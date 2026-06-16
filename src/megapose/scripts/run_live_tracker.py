@@ -430,6 +430,18 @@ def main():
 
             frame_count += 1
 
+            # --- Print pose to terminal ---
+            if last_pose is not None and frame_count % 10 == 0:
+                t = last_pose[:3, 3]
+                R = last_pose[:3, :3]
+                logger.info(
+                    f"[{mode_str}] "
+                    f"T=[{t[0]:+.4f}, {t[1]:+.4f}, {t[2]:+.4f}]m | "
+                    f"R=[{R[0,0]:+.3f} {R[0,1]:+.3f} {R[0,2]:+.3f}; "
+                    f"{R[1,0]:+.3f} {R[1,1]:+.3f} {R[1,2]:+.3f}; "
+                    f"{R[2,0]:+.3f} {R[2,1]:+.3f} {R[2,2]:+.3f}]"
+                )
+
             # --- Visualization ---
             t_frame_end = time.time()
             frame_time = t_frame_end - t_frame_start
