@@ -222,7 +222,7 @@ def main():
         default="yolov8n.pt",
         help="Path to YOLO .pt weights",
     )
-    parser.add_argument("--yolo-conf", type=float, default=0.5)
+    parser.add_argument("--yolo-conf", type=float, default=0.1)
     parser.add_argument(
         "--yolo-label",
         type=str,
@@ -258,6 +258,11 @@ def main():
         "--no-display",
         action="store_true",
         help="Disable OpenCV window (headless mode)",
+    )
+    parser.add_argument(
+        "--continuous-detection",
+        action="store_true",
+        help="Run YOLO every frame to update bounding box (slower but tracks moving objects better)",
     )
     args = parser.parse_args()
 
@@ -381,6 +386,12 @@ def main():
 
             else:
                 # --- FAST PATH: refiner only ---
+                # Update bbox with YOLO if continuous detection is enabled
+                if args.continuous_detection:
+                    result = yolo.detect_best(rgb)
+                    if result is not None:
+                        last_bbox = result[0]
+
                 observation = ObservationTensor.from_numpy(rgb, depth, K).cuda()
                 data_TCO = build_pose_input(object_label, last_pose).cuda()
 
