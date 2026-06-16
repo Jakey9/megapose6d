@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import List, Tuple, Union
 
 # Third Party
+import cv2
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 import numpy as np
 from PIL import Image
 
@@ -27,7 +29,7 @@ from megapose.panda3d_renderer.panda3d_scene_renderer import Panda3dSceneRendere
 from megapose.utils.conversion import convert_scene_observation_to_panda3d
 from megapose.utils.load_model import NAMED_MODELS, load_named_model
 from megapose.utils.logging import get_logger, set_logging_level
-from megapose.visualization.utils import make_contour_overlay
+from megapose.visualization.utils import get_mask_from_rgb, make_contour_overlay
 
 logger = get_logger(__name__)
 
@@ -95,26 +97,22 @@ def make_detections_visualization(
 ) -> None:
     rgb, _, _ = load_observation(example_dir, load_depth=False)
     detections = load_detections(example_dir)
-    
-    fig, ax = plt.subplots(1, 1, figsize=(12, 9))
-    ax.imshow(rgb)
-    
-    # Plot detections as bounding boxes
-    boxes = detections.bboxes.cpu().numpy()  # shape: (N, 4) with [x1, y1, x2, y2]
-    for box in boxes:
-        x1, y1, x2, y2 = box
-        width = x2 - x1
-        height = y2 - y1
-        rect = patches.Rectangle((x1, y1), width, height, linewidth=2, 
-                                 edgecolor='r', facecolor='none')
-        ax.add_patch(rect)
-    
-    ax.set_axis_off()
-    
+
+    img = rgb.copy()
+    boxes = detections.bboxes.cpu().numpy()
+    labels = [row.label for _, row in detections.infos.iterrows()]
+    if "score" in detections.infos.columns:
+        labels = [f"{row.label} {row.score:.2f}" for _, row in detections.infos.iterrows()]
+
+    for box, label in zip(boxes, labels):
+        x1, y1, x2, y2 = box.astype(int)
+        cv2.rectangle(img, (x1, y1), (x2, y2), (255, 0, 0), 2)
+        cv2.putText(img, label, (x1, max(y1 - 5, 0)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
+
     output_fn = example_dir / "visualizations" / "detections.png"
     output_fn.parent.mkdir(exist_ok=True)
-    plt.savefig(output_fn, bbox_inches='tight', dpi=100)
-    plt.close(fig)
+    Image.fromarray(img).save(output_fn)
     logger.info(f"Wrote detections visualization: {output_fn}")
     return
 
@@ -161,6 +159,15 @@ def run_inference(
     return
 
 
+def _make_mesh_overlay(rgb_input: np.ndarray, rgb_rendered: np.ndarray) -> np.ndarray:
+    """Overlay rendered mesh on the input image."""
+    mask = get_mask_from_rgb(rgb_rendered)
+    rgb_overlay = np.zeros_like(rgb_input, dtype=np.float32)
+    rgb_overlay[~mask] = rgb_input[~mask] * 0.6 + 255 * 0.4
+    rgb_overlay[mask] = rgb_rendered[mask] * 0.8 + 255 * 0.2
+    return rgb_overlay.astype(np.uint8)
+
+
 def make_output_visualization(
     example_dir: Path,
 ) -> None:
@@ -189,42 +196,26 @@ def make_output_visualization(
         copy_arrays=True,
     )[0]
 
-    # Create mesh overlay visualization
-    fig, ax = plt.subplots(1, 1, figsize=(12, 9))
-    ax.imshow(rgb)
-    ax.imshow(renderings.rgb, alpha=0.5)
-    ax.set_axis_off()
-    vis_dir = example_dir / "visualizations"
-    vis_dir.mkdir(exist_ok=True)
-    plt.savefig(vis_dir / "mesh_overlay.png", bbox_inches='tight', dpi=100)
-    plt.close(fig)
-
-    # Create contour overlay visualization
+    mesh_overlay = _make_mesh_overlay(rgb, renderings.rgb)
     contour_overlay = make_contour_overlay(
         rgb, renderings.rgb, dilate_iterations=1, color=(0, 255, 0)
     )["img"]
-    fig, ax = plt.subplots(1, 1, figsize=(12, 9))
-    ax.imshow(contour_overlay)
-    ax.set_axis_off()
-    plt.savefig(vis_dir / "contour_overlay.png", bbox_inches='tight', dpi=100)
+
+    vis_dir = example_dir / "visualizations"
+    vis_dir.mkdir(exist_ok=True)
+    Image.fromarray(mesh_overlay).save(vis_dir / "mesh_overlay.png")
+    Image.fromarray(contour_overlay).save(vis_dir / "contour_overlay.png")
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    for ax, img, title in zip(axes, [rgb, contour_overlay, mesh_overlay],
+                              ["RGB", "Contour Overlay", "Mesh Overlay"]):
+        ax.imshow(img)
+        ax.set_title(title)
+        ax.axis("off")
+    plt.tight_layout()
+    fig.savefig(vis_dir / "all_results.png", dpi=150, bbox_inches="tight")
     plt.close(fig)
 
-    # Create combined grid visualization
-    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-    axes[0].imshow(rgb)
-    axes[0].set_title("Original RGB")
-    axes[0].set_axis_off()
-    axes[1].imshow(contour_overlay)
-    axes[1].set_title("Contour Overlay")
-    axes[1].set_axis_off()
-    axes[2].imshow(rgb)
-    axes[2].imshow(renderings.rgb, alpha=0.5)
-    axes[2].set_title("Mesh Overlay")
-    axes[2].set_axis_off()
-    plt.tight_layout()
-    plt.savefig(vis_dir / "all_results.png", bbox_inches='tight', dpi=100)
-    plt.close(fig)
-    
     logger.info(f"Wrote visualizations to {vis_dir}.")
     return
 
