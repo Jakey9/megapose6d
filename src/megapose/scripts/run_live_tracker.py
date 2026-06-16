@@ -269,6 +269,12 @@ def main():
         logger.error(f"Mesh directory not found: {mesh_dir}")
         sys.exit(1)
 
+    # Resolve YOLO model path
+    yolo_model_path = Path(args.yolo_model)
+    if not yolo_model_path.is_absolute() and not yolo_model_path.exists():
+        yolo_model_path = REPO_ROOT / yolo_model_path
+    yolo_model_path = str(yolo_model_path)
+
     object_label = args.object_label
     model_name = args.megapose_model
 
@@ -289,9 +295,9 @@ def main():
     pose_estimator = load_named_model(model_name, object_dataset).cuda()
     logger.info("MegaPose model loaded.")
 
-    logger.info(f"Loading YOLO model from '{args.yolo_model}' (CPU) ...")
+    logger.info(f"Loading YOLO model from '{yolo_model_path}' (CPU) ...")
     yolo = YoloDetector(
-        model_path=args.yolo_model,
+        model_path=yolo_model_path,
         conf=args.yolo_conf,
         target_label=args.yolo_label,
         device="cpu",
