@@ -225,6 +225,12 @@ def main():
     )
     parser.add_argument("--yolo-conf", type=float, default=0.5)
     parser.add_argument(
+        "--yolo-label",
+        type=str,
+        default=None,
+        help="YOLO class to filter for (default: None = accept any detection)",
+    )
+    parser.add_argument(
         "--megapose-model",
         type=str,
         default="megapose-1.0-RGB-multi-hypothesis",
@@ -288,7 +294,7 @@ def main():
     yolo = YoloDetector(
         model_path=args.yolo_model,
         conf=args.yolo_conf,
-        target_label=args.object_label,
+        target_label=args.yolo_label,
         device="cuda",
     )
     logger.info("YOLO model loaded.")
