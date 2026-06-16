@@ -334,11 +334,11 @@ python -m megapose.scripts.download --megapose_models
 python -m megapose.scripts.run_live_tracker \
     --object-label cube \
     --mesh-dir local_data/live_objects \
-    --megapose-model megapose-1.0-RGB \
+    --megapose-model yolo/models/yellowCube.pt \
     --detect-hypotheses 1 \
     --detect-refiner-iterations 2 \
     --track-refiner-iterations 1 \
-    --yolo-conf 0.3
+    --yolo-conf 0.2
 ```
 
 ### Key arguments
@@ -356,6 +356,7 @@ python -m megapose.scripts.run_live_tracker \
 | `--detect-hypotheses` | `5` | Coarse pose hypotheses |
 | `--max-track-failures` | `10` | Failures before re-detection |
 | `--no-display` | disabled | Headless mode (no OpenCV window) |
+  `--continuous-detection` | disabled | Detect object with YOLO continuously if enabled |
 
 ## Using a custom YOLO model
 
