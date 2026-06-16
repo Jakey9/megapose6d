@@ -60,7 +60,8 @@ class PoseEstimator(torch.nn.Module):
         depth_refiner: Optional[DepthRefiner] = None,
         bsz_objects: int = 8,
         bsz_images: int = 256,
-        SO3_grid_size: int = 576,
+        # SO3_grid_size: int = 576,  # original: for 8GB+ GPUs
+        SO3_grid_size: int = 72,  # low-memory: for 4GB GPUs (RTX 3050)
     ) -> None:
 
         super().__init__()

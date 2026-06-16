@@ -290,14 +290,14 @@ def main():
     pose_estimator = load_named_model(model_name, object_dataset).cuda()
     logger.info("MegaPose model loaded.")
 
-    logger.info(f"Loading YOLO model from '{args.yolo_model}' ...")
+    logger.info(f"Loading YOLO model from '{args.yolo_model}' (CPU) ...")
     yolo = YoloDetector(
         model_path=args.yolo_model,
         conf=args.yolo_conf,
         target_label=args.yolo_label,
-        device="cuda",
+        device="cpu",
     )
-    logger.info("YOLO model loaded.")
+    logger.info("YOLO model loaded (running on CPU to save GPU memory).")
 
     # --- Initialize RealSense ---
     logger.info("Initializing RealSense camera ...")
