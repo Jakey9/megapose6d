@@ -25,6 +25,7 @@ import cv2
 import numpy as np
 import pandas as pd
 import torch
+import pyrealsense2 as rs
 
 from megapose.config import LOCAL_DATA_DIR
 from megapose.datasets.object_dataset import RigidObject, RigidObjectDataset
@@ -91,7 +92,6 @@ def build_pose_input(
 
 def init_realsense(width: int, height: int, fps: int):
     """Initialize RealSense pipeline and return (pipeline, align, profile)."""
-    import pyrealsense2 as rs
 
     pipeline = rs.pipeline()
     config = rs.config()
@@ -116,7 +116,6 @@ def grab_frame(pipeline, align, use_depth: bool):
         depth: [H, W] float32 in meters, or None
         K: [3, 3] float32 intrinsics
     """
-    import pyrealsense2 as rs
 
     frames = pipeline.wait_for_frames()
     aligned = align.process(frames)

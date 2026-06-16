@@ -332,9 +332,13 @@ python -m megapose.scripts.download --megapose_models
 
 ```bash
 python -m megapose.scripts.run_live_tracker \
-    --object-label <your-object-label> \
+    --object-label cube \
     --mesh-dir local_data/live_objects \
-    --yolo-model yolov8n.pt
+    --megapose-model megapose-1.0-RGB \
+    --detect-hypotheses 1 \
+    --detect-refiner-iterations 2 \
+    --track-refiner-iterations 1 \
+    --yolo-conf 0.3
 ```
 
 ### Key arguments

@@ -1,0 +1,6 @@
+path: yolo/training/datasets/cube
+train: images/train
+val: images/val
+
+names:
+  0: cube
