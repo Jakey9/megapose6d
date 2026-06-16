@@ -1,69 +1,80 @@
 name: megapose
 channels:
-   - conda-forge
-   - pytorch
-   - anaconda
-   - defaults
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+
 dependencies:
   - python=3.9
   - pip
-  - wget
-  - python-wget
+
+  # =========================
+  # Core PyTorch stack (STABLE)
+  # =========================
+  - pytorch=2.1.2
+  - torchvision=0.16.2
+  - pytorch-cuda=11.8
+
+  # =========================
+  # Scientific stack (pinned for stability)
+  # =========================
+  - numpy=1.26.*
+  - scipy
+  - pillow
+  - h5py
+  - pyyaml
+  - tqdm
   - joblib
-  - pytorch==1.11.0
-  - torchvision==0.12.0
-  - cudatoolkit==11.3.1
   - ipython
   - ipykernel
-  - jupyterlab
-  - notebook
-  - nb_conda_kernels
-  - jupyter_contrib_nbextensions
+  - notebook=6.5.6
+
+  # =========================
+  # Robotics / geometry deps
+  # =========================
   - pinocchio
   - rclone
-  - pillow
-  - ipywidgets
-  - selenium
-  - geckodriver
-  - firefox
+
+  # =========================
+  # Critical runtime stability libs (IMPORTANT FIX)
+  # =========================
+  # - mkl
+  # - mkl-service
+  # - intel-openmp
+
+  # =========================
+  # pip-only packages
+  # =========================
   - pip:
+      # vision / geometry
+      - opencv-python
+      - transforms3d
+      - roma
+      - trimesh
       - meshcat
-      - selenium
+      - dt-apriltags
+      - kornia
+
+      # dataset / IO
+      - webdataset
       - omegaconf
       - simplejson
-      - line_profiler 
-      - opencv-python
-      - torchnet
-      - tqdm
-      - lxml
-      - transforms3d
-      - panda3d
-      - joblib
-      - xarray 
-      - pandas
-      - matplotlib
-      - bokeh
-      - plyfile 
-      - trimesh 
-      - ipdb 
-      - panda3d-gltf
-      - colorama
-      - pyyaml
-      - ipykernel
-      - scipy
-      - pypng
-      - h5py 
-      - seaborn
-      - kornia 
-      - pyarrow 
-      - dt_apriltags 
-      - open3d
+      - psutil
       - structlog
       - imageio
       - progressbar
-      - pyyaml
-      - psutil
-      - webdataset
-      - opencv-contrib-python 
-      - roma 
-      - torchgeometry
+      - colorama
+      - pyarrow
+      # - bokeh
+      - pypng
+      # - seaborn
+
+      # visualization
+      - matplotlib
+
+      # IMPORTANT: removed torchgeometry (obsolete + breaks torch ABI)
+
+      # optional heavy libs
+      - open3d
+      - panda3d

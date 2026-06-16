@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import List, Tuple, Union
 
 # Third Party
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 import numpy as np
-from bokeh.io import export_png
-from bokeh.plotting import gridplot
 from PIL import Image
 
 # MegaPose
@@ -27,7 +27,6 @@ from megapose.panda3d_renderer.panda3d_scene_renderer import Panda3dSceneRendere
 from megapose.utils.conversion import convert_scene_observation_to_panda3d
 from megapose.utils.load_model import NAMED_MODELS, load_named_model
 from megapose.utils.logging import get_logger, set_logging_level
-from megapose.visualization.bokeh_plotter import BokehPlotter
 from megapose.visualization.utils import make_contour_overlay
 
 logger = get_logger(__name__)
@@ -96,12 +95,26 @@ def make_detections_visualization(
 ) -> None:
     rgb, _, _ = load_observation(example_dir, load_depth=False)
     detections = load_detections(example_dir)
-    plotter = BokehPlotter()
-    fig_rgb = plotter.plot_image(rgb)
-    fig_det = plotter.plot_detections(fig_rgb, detections=detections)
+    
+    fig, ax = plt.subplots(1, 1, figsize=(12, 9))
+    ax.imshow(rgb)
+    
+    # Plot detections as bounding boxes
+    boxes = detections.bboxes.cpu().numpy()  # shape: (N, 4) with [x1, y1, x2, y2]
+    for box in boxes:
+        x1, y1, x2, y2 = box
+        width = x2 - x1
+        height = y2 - y1
+        rect = patches.Rectangle((x1, y1), width, height, linewidth=2, 
+                                 edgecolor='r', facecolor='none')
+        ax.add_patch(rect)
+    
+    ax.set_axis_off()
+    
     output_fn = example_dir / "visualizations" / "detections.png"
     output_fn.parent.mkdir(exist_ok=True)
-    export_png(fig_det, filename=output_fn)
+    plt.savefig(output_fn, bbox_inches='tight', dpi=100)
+    plt.close(fig)
     logger.info(f"Wrote detections visualization: {output_fn}")
     return
 
@@ -176,20 +189,42 @@ def make_output_visualization(
         copy_arrays=True,
     )[0]
 
-    plotter = BokehPlotter()
+    # Create mesh overlay visualization
+    fig, ax = plt.subplots(1, 1, figsize=(12, 9))
+    ax.imshow(rgb)
+    ax.imshow(renderings.rgb, alpha=0.5)
+    ax.set_axis_off()
+    vis_dir = example_dir / "visualizations"
+    vis_dir.mkdir(exist_ok=True)
+    plt.savefig(vis_dir / "mesh_overlay.png", bbox_inches='tight', dpi=100)
+    plt.close(fig)
 
-    fig_rgb = plotter.plot_image(rgb)
-    fig_mesh_overlay = plotter.plot_overlay(rgb, renderings.rgb)
+    # Create contour overlay visualization
     contour_overlay = make_contour_overlay(
         rgb, renderings.rgb, dilate_iterations=1, color=(0, 255, 0)
     )["img"]
-    fig_contour_overlay = plotter.plot_image(contour_overlay)
-    fig_all = gridplot([[fig_rgb, fig_contour_overlay, fig_mesh_overlay]], toolbar_location=None)
-    vis_dir = example_dir / "visualizations"
-    vis_dir.mkdir(exist_ok=True)
-    export_png(fig_mesh_overlay, filename=vis_dir / "mesh_overlay.png")
-    export_png(fig_contour_overlay, filename=vis_dir / "contour_overlay.png")
-    export_png(fig_all, filename=vis_dir / "all_results.png")
+    fig, ax = plt.subplots(1, 1, figsize=(12, 9))
+    ax.imshow(contour_overlay)
+    ax.set_axis_off()
+    plt.savefig(vis_dir / "contour_overlay.png", bbox_inches='tight', dpi=100)
+    plt.close(fig)
+
+    # Create combined grid visualization
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    axes[0].imshow(rgb)
+    axes[0].set_title("Original RGB")
+    axes[0].set_axis_off()
+    axes[1].imshow(contour_overlay)
+    axes[1].set_title("Contour Overlay")
+    axes[1].set_axis_off()
+    axes[2].imshow(rgb)
+    axes[2].imshow(renderings.rgb, alpha=0.5)
+    axes[2].set_title("Mesh Overlay")
+    axes[2].set_axis_off()
+    plt.tight_layout()
+    plt.savefig(vis_dir / "all_results.png", bbox_inches='tight', dpi=100)
+    plt.close(fig)
+    
     logger.info(f"Wrote visualizations to {vis_dir}.")
     return
 
