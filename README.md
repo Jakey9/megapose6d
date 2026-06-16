@@ -293,6 +293,76 @@ $MEGAPOSE_DATA_DIR/examples/barbecue-sauce/
 For optimal performance, we recommend using `megapose-1.0-RGB-multi-hypothesis` for an RGB image and `megapose-1.0-RGB-multi-hypothesis-icp` for an RGB-D image. An extended paper with full evaluation of these new approaches is coming soon.
 
 
+# Live Tracker (RealSense + YOLO + MegaPose)
+
+We provide a standalone real-time tracking script that combines a RealSense camera, YOLO 2D detection, and MegaPose pose estimation in a fast loop. No ROS or ZMQ server required.
+
+## How it works
+
+1. **Detection (slow path, ~1-3s):** YOLO detects the object's bounding box, then the full MegaPose pipeline (coarse + refiner + scoring) estimates the initial 6D pose.
+2. **Tracking (fast path, ~30-50ms):** On subsequent frames, only the MegaPose refiner runs (1 iteration), using the previous pose as initialization. This achieves 20-30 FPS.
+3. **Recovery:** If tracking quality degrades (large pose delta between frames), the system re-runs YOLO detection automatically.
+
+## Setup
+
+### 1. Install additional dependencies
+
+```bash
+conda activate megapose
+pip install pyrealsense2 ultralytics
+```
+
+### 2. Place your object mesh
+
+```
+local_data/live_objects/
+    <object-label>/
+        model.ply       # mesh in millimeters
+```
+
+The directory name becomes the object label. See `local_data/live_objects/README.md` for details.
+
+### 3. Download MegaPose models (if not done already)
+
+```bash
+python -m megapose.scripts.download --megapose_models
+```
+
+## Running
+
+```bash
+python -m megapose.scripts.run_live_tracker \
+    --object-label <your-object-label> \
+    --mesh-dir local_data/live_objects \
+    --yolo-model yolov8n.pt
+```
+
+### Key arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--object-label` | (required) | Must match mesh directory name |
+| `--mesh-dir` | `local_data/live_objects` | Path to mesh directories |
+| `--yolo-model` | `yolov8n.pt` | YOLO weights (general or custom) |
+| `--yolo-conf` | `0.5` | Detection confidence threshold |
+| `--megapose-model` | `megapose-1.0-RGB-multi-hypothesis` | MegaPose model variant |
+| `--use-depth` | disabled | Enable RGB-D mode |
+| `--track-refiner-iterations` | `1` | Refiner iterations per tracking frame |
+| `--detect-refiner-iterations` | `5` | Refiner iterations on detection |
+| `--detect-hypotheses` | `5` | Coarse pose hypotheses |
+| `--max-track-failures` | `10` | Failures before re-detection |
+| `--no-display` | disabled | Headless mode (no OpenCV window) |
+
+## Using a custom YOLO model
+
+The default `yolov8n.pt` uses general COCO classes. For better accuracy on your specific object, train a custom model:
+
+1. Prepare dataset in `yolo/training/datasets/` (see `yolo/training/README.md`)
+2. Train: `yolo train data=yolo/training/datasets/my_object/dataset.yaml model=yolov8n.pt epochs=100`
+3. Copy weights: `cp runs/detect/train/weights/best.pt yolo/models/my_object.pt`
+4. Use: `--yolo-model yolo/models/my_object.pt`
+
+
 # Dataset
 
 ## Dataset information
