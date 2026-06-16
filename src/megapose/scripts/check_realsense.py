@@ -27,7 +27,7 @@ except ImportError:
 def main():
     width, height, fps = 640, 480, 30
 
-    print(f"[INFO] pyrealsense2 version: {rs.__version__}")
+    # print(f"[INFO] pyrealsense2 version: {rs.__version__}")
     print(f"[INFO] Configuring streams: {width}x{height} @ {fps} FPS")
 
     ctx = rs.context()

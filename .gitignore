@@ -21,3 +21,16 @@ my-notebooks/
 tmp/
 *tmp/
 tests.sh
+
+# Ignore everything in local_data
+local_data/*
+
+# But keep the folder itself (important)
+!local_data/
+!local_data/live_objects/
+!local_data/live_objects/**
+
+yolo/training/runs/*
+yolo/models/*
+yolo26n.pt
+yolov8n.pt

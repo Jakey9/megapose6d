@@ -148,10 +148,12 @@ def main():
             frame_count += 1
 
             if frame_count % 60 == 0 and detections:
-                print(
-                    f"[INFO] Frame {frame_count}: {len(detections)} detection(s) - "
-                    f"{', '.join(f'{d[\"label\"]} ({d[\"conf\"]:.2f})' for d in detections)}"
+                labels = ", ".join(
+                    f"{d['label']} ({d['conf']:.2f})"
+                    for d in detections
                 )
+
+                print(f"[INFO] Frame {frame_count}: {len(detections)} detection(s) - {labels}")
 
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break

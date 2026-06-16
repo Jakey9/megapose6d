@@ -1,4 +1,5 @@
-path: yolo/training/datasets/cube
+path: /home/zj/projects/P_PAI/perception_ws/megapose6d/yolo/training/datasets/cube
+# path: .
 train: images/train
 val: images/val
 
