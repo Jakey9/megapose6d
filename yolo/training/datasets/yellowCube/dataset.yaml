@@ -1,0 +1,7 @@
+path: /home/zj/projects/P_PAI/perception_ws/megapose6d/yolo/training/datasets/yellowCube
+# path: .
+train: images/train
+val: images/val
+
+names:
+  0: yellowCube

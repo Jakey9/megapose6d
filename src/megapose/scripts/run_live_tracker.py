@@ -441,17 +441,17 @@ def main():
 
             frame_count += 1
 
-            # --- Print pose to terminal ---
-            if last_pose is not None and frame_count % 10 == 0:
-                t = last_pose[:3, 3]
-                R = last_pose[:3, :3]
-                logger.info(
-                    f"[{mode_str}] "
-                    f"T=[{t[0]:+.4f}, {t[1]:+.4f}, {t[2]:+.4f}]m | "
-                    f"R=[{R[0,0]:+.3f} {R[0,1]:+.3f} {R[0,2]:+.3f}; "
-                    f"{R[1,0]:+.3f} {R[1,1]:+.3f} {R[1,2]:+.3f}; "
-                    f"{R[2,0]:+.3f} {R[2,1]:+.3f} {R[2,2]:+.3f}]"
-                )
+            # # --- Print pose to terminal ---
+            # if last_pose is not None and frame_count % 10 == 0:
+            #     t = last_pose[:3, 3]
+            #     R = last_pose[:3, :3]
+            #     logger.info(
+            #         f"[{mode_str}] "
+            #         f"T=[{t[0]:+.4f}, {t[1]:+.4f}, {t[2]:+.4f}]m | "
+            #         f"R=[{R[0,0]:+.3f} {R[0,1]:+.3f} {R[0,2]:+.3f}; "
+            #         f"{R[1,0]:+.3f} {R[1,1]:+.3f} {R[1,2]:+.3f}; "
+            #         f"{R[2,0]:+.3f} {R[2,1]:+.3f} {R[2,2]:+.3f}]"
+            #     )
 
             # --- Visualization ---
             t_frame_end = time.time()
@@ -486,7 +486,8 @@ def main():
                 # Show translation
                 if last_pose is not None:
                     t = last_pose[:3, 3]
-                    pos_str = f"T=[{t[0]:.3f}, {t[1]:.3f}, {t[2]:.3f}]m"
+                    R = last_pose[:3, :3]
+                    pos_str = f"T=[{t[0]:.3f}, {t[1]:.3f}, {t[2]:.3f}]m, R=[{R[0,0]:+.3f} {R[0,1]:+.3f} {R[0,2]:+.3f}; "
                     cv2.putText(
                         vis,
                         pos_str,

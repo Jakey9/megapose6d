@@ -30,7 +30,8 @@ local_data/*
 !local_data/live_objects/
 !local_data/live_objects/**
 
-yolo/training/runs/*
+yolo/training/runs
 yolo/models/*
+yolo/training/datasets/raw_data
 yolo26n.pt
 yolov8n.pt
