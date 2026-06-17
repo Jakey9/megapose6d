@@ -31,19 +31,23 @@ from DINO.models import load_dinov2
 class DinoDetector:
     """Few-shot object detector using DINOv2 patch feature matching.
 
-    Extracts dense patch tokens from reference images at init time, then
-    compares them against scene patch tokens to produce a similarity heatmap.
-    A bounding box is fitted around the highest-similarity region.
+    Uses multi-descriptor nearest-neighbor matching with adaptive thresholding
+    to robustly localize objects regardless of scene content.
 
     Args:
         reference_dir: Directory containing 3-10 reference images of the object.
+            Images should be tight crops with the object filling the frame.
         label: Object label string (returned with detections).
         model_name: DINOv2 model variant.
             Options: "dinov2_vits14", "dinov2_vitb14", "dinov2_vitl14".
-        similarity_threshold: Minimum cosine similarity to consider a patch
-            as belonging to the object.
+        n_ref_patches: Number of top reference patches to keep as descriptors.
+            More patches = better recall but slower matching.
+        adaptive_std_factor: Number of standard deviations above mean for
+            adaptive threshold. Higher = stricter detection.
         min_blob_area: Minimum number of patches in a connected component
             to be considered a valid detection.
+        max_blob_ratio: Maximum ratio of detected blob area to total grid area.
+            Rejects detections that cover too much of the frame.
         device: Torch device for inference.
     """
 
@@ -55,13 +59,17 @@ class DinoDetector:
         reference_dir: Union[str, Path],
         label: str,
         model_name: str = "dinov2_vits14",
-        similarity_threshold: float = 0.5,
+        n_ref_patches: int = 30,
+        adaptive_std_factor: float = 2.0,
         min_blob_area: int = 4,
+        max_blob_ratio: float = 0.5,
         device: str = "cuda",
     ):
         self.label = label
-        self.similarity_threshold = similarity_threshold
+        self.n_ref_patches = n_ref_patches
+        self.adaptive_std_factor = adaptive_std_factor
         self.min_blob_area = min_blob_area
+        self.max_blob_ratio = max_blob_ratio
         self.device = device
 
         self.model = load_dinov2(model_name, pretrained=True)
@@ -75,16 +83,18 @@ class DinoDetector:
             ),
         ])
 
-        self.ref_descriptor = self._build_reference_descriptor(
-            Path(reference_dir)
-        )
+        self.ref_patches = self._build_reference_patches(Path(reference_dir))
 
-    def _build_reference_descriptor(self, ref_dir: Path) -> torch.Tensor:
-        """Extract and average patch features from all reference images.
+    def _build_reference_patches(self, ref_dir: Path) -> torch.Tensor:
+        """Extract the most distinctive patch features from reference images.
+
+        Instead of averaging into a single descriptor (which loses discriminative
+        power), we keep the top-K most mutually-consistent patches across all
+        reference images. Each represents a distinctive local appearance of the
+        object (a yellow face, an edge, a corner, etc.).
 
         Returns:
-            Tensor of shape [feat_dim] — the averaged CLS+patch descriptor
-            used for per-patch similarity scoring.
+            Tensor of shape [K, feat_dim] — top-K reference patch descriptors.
         """
         extensions = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
         image_paths = sorted(
@@ -97,7 +107,7 @@ class DinoDetector:
                 f"Need at least 1 image (3-10 recommended)."
             )
 
-        all_patch_features = []
+        all_patches = []
 
         for img_path in image_paths:
             img = cv2.imread(str(img_path))
@@ -105,7 +115,6 @@ class DinoDetector:
                 continue
             img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-            # Resize to square input for consistent patch count
             img_resized = cv2.resize(img_rgb, (self.SCENE_RESIZE, self.SCENE_RESIZE))
             tensor = self.transform(img_resized).unsqueeze(0).to(self.device)
 
@@ -113,22 +122,83 @@ class DinoDetector:
                 features = self.model.forward_features(tensor)
                 patch_tokens = features["x_norm_patchtokens"]  # [1, N, D]
 
-            all_patch_features.append(patch_tokens.squeeze(0))  # [N, D]
+            patches = patch_tokens.squeeze(0)  # [N, D]
+            patches = F.normalize(patches, dim=1)
+            all_patches.append(patches)
 
-        if not all_patch_features:
+        if not all_patches:
             raise ValueError(f"Could not load any images from {ref_dir}")
 
-        # Average all patch features across all reference images into a single
-        # descriptor vector. This captures the object's appearance compactly.
-        stacked = torch.cat(all_patch_features, dim=0)  # [total_patches, D]
-        descriptor = stacked.mean(dim=0)  # [D]
-        descriptor = F.normalize(descriptor, dim=0)
+        # Select the most discriminative patches via cross-image consistency:
+        # Patches representing the object will be similar across images,
+        # while background patches will differ.
+        if len(all_patches) >= 2:
+            ref_patches = self._select_consistent_patches(all_patches)
+        else:
+            # Single image: use center patches (assume object is centered)
+            patches = all_patches[0]
+            grid_size = self.SCENE_RESIZE // self.PATCH_SIZE
+            ref_patches = self._select_center_patches(patches, grid_size)
 
-        return descriptor
+        return ref_patches
+
+    def _select_consistent_patches(
+        self, all_patches: list
+    ) -> torch.Tensor:
+        """Select patches that are consistent across multiple reference images.
+
+        For each patch in each image, compute its max-similarity to patches in
+        other images. Patches with high cross-image similarity are likely object
+        patches (the object is consistent, backgrounds vary).
+        """
+        n_images = len(all_patches)
+        scored_patches = []
+
+        for i, patches_i in enumerate(all_patches):
+            # For each patch in image i, find its best match in other images
+            cross_sims = []
+            for j, patches_j in enumerate(all_patches):
+                if i == j:
+                    continue
+                # [N_i, N_j] similarity matrix
+                sim_matrix = patches_i @ patches_j.T
+                best_match_sim = sim_matrix.max(dim=1).values  # [N_i]
+                cross_sims.append(best_match_sim)
+
+            # Average best-match similarity across other images
+            avg_cross_sim = torch.stack(cross_sims, dim=0).mean(dim=0)  # [N_i]
+
+            for idx in range(patches_i.shape[0]):
+                scored_patches.append((avg_cross_sim[idx].item(), patches_i[idx]))
+
+        # Sort by cross-image consistency and keep top K
+        scored_patches.sort(key=lambda x: x[0], reverse=True)
+        top_k = min(self.n_ref_patches, len(scored_patches))
+        selected = torch.stack([p[1] for p in scored_patches[:top_k]], dim=0)
+
+        return selected  # [K, D]
+
+    def _select_center_patches(
+        self, patches: torch.Tensor, grid_size: int
+    ) -> torch.Tensor:
+        """Select patches from the center region (single-image fallback)."""
+        center_start = grid_size // 4
+        center_end = grid_size - center_start
+        indices = []
+        for r in range(center_start, center_end):
+            for c in range(center_start, center_end):
+                indices.append(r * grid_size + c)
+
+        center_patches = patches[indices]
+        # Take top K by norm (most "activated" patches)
+        norms = center_patches.norm(dim=1)
+        top_k = min(self.n_ref_patches, len(indices))
+        _, top_idx = norms.topk(top_k)
+        return center_patches[top_idx]
 
     def _extract_scene_features(
         self, rgb: np.ndarray
-    ) -> tuple[torch.Tensor, int, int, float, float]:
+    ) -> tuple:
         """Extract patch tokens from a scene image.
 
         Returns:
@@ -140,8 +210,6 @@ class DinoDetector:
         """
         h_orig, w_orig = rgb.shape[:2]
 
-        # Resize so the shorter side is SCENE_RESIZE, maintaining aspect ratio
-        # Actually for simplicity and consistency, resize to fixed square
         img_resized = cv2.resize(rgb, (self.SCENE_RESIZE, self.SCENE_RESIZE))
         tensor = self.transform(img_resized).unsqueeze(0).to(self.device)
 
@@ -161,7 +229,7 @@ class DinoDetector:
 
         return patch_tokens, grid_h, grid_w, scale_y, scale_x
 
-    def detect(self, rgb: np.ndarray) -> list[dict] | None:
+    def detect(self, rgb: np.ndarray) -> list:
         """Run detection on a single RGB image.
 
         Args:
@@ -178,22 +246,35 @@ class DinoDetector:
             self._extract_scene_features(rgb)
         )
 
-        # Cosine similarity between each scene patch and the reference descriptor
-        similarity = (patch_tokens @ self.ref_descriptor).cpu().numpy()  # [N]
+        # Per-patch max similarity against reference patch set (nearest-neighbor)
+        # Each scene patch is scored by how well it matches its BEST reference patch
+        sim_matrix = patch_tokens @ self.ref_patches.T  # [N_scene, K_ref]
+        similarity = sim_matrix.max(dim=1).values.cpu().numpy()  # [N_scene]
         sim_map = similarity.reshape(grid_h, grid_w)
 
-        # Threshold to binary mask
-        mask = (sim_map >= self.similarity_threshold).astype(np.uint8)
+        # Adaptive threshold: mean + factor * std
+        # This finds patches significantly more similar than the background baseline
+        sim_mean = sim_map.mean()
+        sim_std = sim_map.std()
+        threshold = sim_mean + self.adaptive_std_factor * sim_std
+
+        mask = (sim_map >= threshold).astype(np.uint8)
 
         # Find connected components
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
             mask, connectivity=8
         )
 
+        total_area = grid_h * grid_w
         detections = []
+
         for i in range(1, num_labels):  # skip background (label 0)
             area = stats[i, cv2.CC_STAT_AREA]
             if area < self.min_blob_area:
+                continue
+
+            # Reject blobs that cover too much of the frame
+            if area / total_area > self.max_blob_ratio:
                 continue
 
             # Bounding box in patch coordinates
@@ -224,7 +305,7 @@ class DinoDetector:
 
     def detect_best(
         self, rgb: np.ndarray
-    ) -> tuple[np.ndarray, str, float] | None:
+    ) -> tuple:
         """Return the highest-confidence detection.
 
         Args:

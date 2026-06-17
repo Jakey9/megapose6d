@@ -225,16 +225,28 @@ def main():
         help="DINOv2 model variant (dinov2_vits14, dinov2_vitb14, dinov2_vitl14)",
     )
     parser.add_argument(
-        "--similarity-threshold",
+        "--n-ref-patches",
+        type=int,
+        default=30,
+        help="Number of top reference patches to keep as descriptors",
+    )
+    parser.add_argument(
+        "--adaptive-std-factor",
         type=float,
-        default=0.5,
-        help="Cosine similarity threshold for patch matching",
+        default=2.0,
+        help="Std deviations above mean for adaptive threshold (higher = stricter)",
     )
     parser.add_argument(
         "--min-blob-area",
         type=int,
         default=4,
         help="Minimum patch count for a valid detection blob",
+    )
+    parser.add_argument(
+        "--max-blob-ratio",
+        type=float,
+        default=0.5,
+        help="Max fraction of frame a detection can cover (rejects full-frame blobs)",
     )
     parser.add_argument(
         "--megapose-model",
@@ -316,8 +328,10 @@ def main():
         reference_dir=str(reference_dir),
         label=object_label,
         model_name=args.dino_model,
-        similarity_threshold=args.similarity_threshold,
+        n_ref_patches=args.n_ref_patches,
+        adaptive_std_factor=args.adaptive_std_factor,
         min_blob_area=args.min_blob_area,
+        max_blob_ratio=args.max_blob_ratio,
         device="cuda",
     )
     logger.info("DINOv2 detector loaded and reference features cached.")
