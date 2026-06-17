@@ -516,34 +516,42 @@ def main():
                         )
 
                 # Check 3: Periodic DINO verification (lightweight)
-                # Runs DINO every N frames to confirm pose is on the object
+                # Runs every N frames regardless of failure state — this is
+                # critical for detecting both "object removed" and "object
+                # returned" scenarios.
                 if (
                     args.verify_interval > 0
                     and frame_count % args.verify_interval == 0
-                    and consecutive_failures == 0
                     and last_pose is not None
                 ):
                     verify_result = dino.detect_best(rgb)
 
                     if verify_result is None:
-                        # Object not visible at all — immediate failure
+                        # Object not visible — force immediate re-detection
                         consecutive_failures = args.max_track_failures
+                        last_pose = None
+                        anchor_pose = None
                         mode_str = "VERIFY (object gone)"
                         logger.info(
-                            "DINO verification: object not found in frame"
+                            "DINO verification: object not found in frame, "
+                            "resetting tracker"
                         )
                     else:
                         verify_bbox = verify_result[0]
-                        last_bbox = verify_bbox  # Update bbox from DINO
+                        last_bbox = verify_bbox
 
-                        # Check if pose center projects inside DINO bbox
                         pose_center_px = project_pose_center(K, last_pose)
                         if not point_in_bbox(pose_center_px, verify_bbox):
-                            consecutive_failures += 3
-                            mode_str = "VERIFY (pose outside bbox)"
+                            # Pose is not on the object — force re-detection
+                            consecutive_failures = args.max_track_failures
+                            last_pose = None
+                            anchor_pose = None
+                            mode_str = "VERIFY (pose detached)"
                             logger.info(
                                 f"Pose center {pose_center_px.astype(int).tolist()} "
-                                f"outside DINO bbox {verify_bbox.astype(int).tolist()}"
+                                f"outside DINO bbox "
+                                f"{verify_bbox.astype(int).tolist()}, "
+                                f"resetting tracker"
                             )
 
                 # Check 4: Periodic scoring (optional, heavier)
