@@ -30,21 +30,25 @@ The following packages are required (all should already be available in the Mega
 - OpenCV (`opencv-python`)
 - NumPy
 
-### Install DINOv2 (via torch.hub)
+### Install DINOv2 Weights
 
-No separate installation is needed. DINOv2 models are loaded automatically through `torch.hub` on first use:
+No separate installation or `torch.hub` clone is needed. This module includes a
+self-contained ViT implementation (`DINO/models.py`) that is Python 3.9+
+compatible. Pretrained weights are downloaded automatically from Facebook AI
+on first use:
 
 ```bash
-# The model downloads automatically on first run (~86MB for vits14)
-# Cached at ~/.cache/torch/hub/
-python -c "import torch; torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14')"
+# Weights download automatically on first run (~86MB for vits14)
+# Cached at ~/.cache/torch/hub/checkpoints/
+python -c "from DINO.models import load_dinov2; load_dinov2('dinov2_vits14')"
 ```
 
-If you are behind a firewall or need offline use, pre-download the hub repo:
+If you are behind a firewall, manually download the weights:
 
 ```bash
-# Pre-download the hub repository
-git clone https://github.com/facebookresearch/dinov2.git ~/.cache/torch/hub/facebookresearch_dinov2_main
+mkdir -p ~/.cache/torch/hub/checkpoints
+wget -P ~/.cache/torch/hub/checkpoints/ \
+    https://dl.fbaipublicfiles.com/dinov2/dinov2_vits14/dinov2_vits14_pretrain.pth
 ```
 
 ### Verify Installation

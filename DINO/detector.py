@@ -17,13 +17,15 @@ Usage:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torchvision import transforms
+
+from DINO.models import load_dinov2
 
 
 class DinoDetector:
@@ -36,7 +38,7 @@ class DinoDetector:
     Args:
         reference_dir: Directory containing 3-10 reference images of the object.
         label: Object label string (returned with detections).
-        model_name: DINOv2 model variant from torch.hub.
+        model_name: DINOv2 model variant.
             Options: "dinov2_vits14", "dinov2_vitb14", "dinov2_vitl14".
         similarity_threshold: Minimum cosine similarity to consider a patch
             as belonging to the object.
@@ -50,7 +52,7 @@ class DinoDetector:
 
     def __init__(
         self,
-        reference_dir: str | Path,
+        reference_dir: Union[str, Path],
         label: str,
         model_name: str = "dinov2_vits14",
         similarity_threshold: float = 0.5,
@@ -62,9 +64,7 @@ class DinoDetector:
         self.min_blob_area = min_blob_area
         self.device = device
 
-        self.model = torch.hub.load(
-            "facebookresearch/dinov2", model_name, pretrained=True
-        )
+        self.model = load_dinov2(model_name, pretrained=True)
         self.model.eval().to(self.device)
 
         self.transform = transforms.Compose([
