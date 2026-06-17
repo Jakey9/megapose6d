@@ -194,6 +194,37 @@ def compute_pose_delta(pose_a: np.ndarray, pose_b: np.ndarray) -> float:
     return t_delta + 0.1 * angle_delta
 
 
+def project_pose_center(K: np.ndarray, pose_4x4: np.ndarray) -> np.ndarray:
+    """Project the pose origin (object center) onto the image plane.
+
+    Returns:
+        [x, y] pixel coordinates of the projected object center.
+    """
+    t = pose_4x4[:3, 3]
+    p = K @ t
+    if abs(p[2]) < 1e-6:
+        return np.array([-1.0, -1.0])
+    return np.array([p[0] / p[2], p[1] / p[2]])
+
+
+def point_in_bbox(point: np.ndarray, bbox: np.ndarray, margin: float = 0.3) -> bool:
+    """Check if a 2D point is inside a bbox with margin expansion.
+
+    Args:
+        point: [x, y] pixel coordinates.
+        bbox: [x1, y1, x2, y2] bounding box.
+        margin: Expand the bbox by this fraction on each side for tolerance.
+    """
+    x1, y1, x2, y2 = bbox
+    w = x2 - x1
+    h = y2 - y1
+    x1_exp = x1 - margin * w
+    y1_exp = y1 - margin * h
+    x2_exp = x2 + margin * w
+    y2_exp = y2 + margin * h
+    return x1_exp <= point[0] <= x2_exp and y1_exp <= point[1] <= y2_exp
+
+
 def main():
     set_logging_level("info")
 
@@ -257,12 +288,24 @@ def main():
     parser.add_argument("--track-refiner-iterations", type=int, default=1)
     parser.add_argument("--detect-refiner-iterations", type=int, default=5)
     parser.add_argument("--detect-hypotheses", type=int, default=5)
-    parser.add_argument("--max-track-failures", type=int, default=10)
+    parser.add_argument("--max-track-failures", type=int, default=5)
     parser.add_argument(
         "--pose-delta-threshold",
         type=float,
         default=0.15,
         help="Max pose delta per frame before flagging as lost",
+    )
+    parser.add_argument(
+        "--verify-interval",
+        type=int,
+        default=10,
+        help="Run DINO verification every N frames to catch drift/removal (0=disabled)",
+    )
+    parser.add_argument(
+        "--drift-threshold",
+        type=float,
+        default=0.10,
+        help="Max cumulative translation drift (meters) from anchor before re-detect",
     )
     parser.add_argument(
         "--periodic-scoring-interval",
@@ -345,12 +388,17 @@ def main():
 
     # --- Tracking state ---
     last_pose: np.ndarray | None = None
+    anchor_pose: np.ndarray | None = None  # Pose at last confident detection
     last_bbox: np.ndarray | None = None
     consecutive_failures = 0
     frame_count = 0
     fps_smooth = 0.0
 
     logger.info("Starting tracking loop. Press 'q' to quit.")
+    logger.info(
+        f"Verification: every {args.verify_interval} frames | "
+        f"drift threshold: {args.drift_threshold}m"
+    )
 
     try:
         while True:
@@ -366,16 +414,16 @@ def main():
             )
 
             if need_detect:
-                # --- SLOW PATH: DINO + full pipeline ---
+                # --- SLOW PATH: DINO + full MegaPose pipeline ---
                 result = dino.detect_best(rgb)
                 if result is None:
                     vis = rgb[:, :, ::-1].copy()
                     cv2.putText(
                         vis,
-                        "No detection",
+                        "No detection - object not visible",
                         (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX,
-                        0.8,
+                        0.7,
                         (0, 0, 255),
                         2,
                     )
@@ -383,6 +431,7 @@ def main():
                         cv2.imshow("MegaPose Tracker (DINO)", vis)
                         if cv2.waitKey(1) & 0xFF == ord("q"):
                             break
+                    frame_count += 1
                     continue
 
                 bbox, label, conf = result
@@ -405,9 +454,11 @@ def main():
 
                 if len(output.poses) == 0:
                     logger.warning("Full pipeline returned no poses.")
+                    frame_count += 1
                     continue
 
                 last_pose = output.poses[0].cpu().numpy()
+                anchor_pose = last_pose.copy()
                 consecutive_failures = 0
                 mode_str = "DETECT"
 
@@ -433,35 +484,84 @@ def main():
 
                 if len(refined.poses) == 0:
                     consecutive_failures += 1
-                    mode_str = "TRACK (fail)"
+                    mode_str = "TRACK (no pose)"
                 else:
                     new_pose = refined.poses[0].cpu().numpy()
 
+                    # Check 1: Frame-to-frame jump
                     delta = compute_pose_delta(last_pose, new_pose)
                     if delta > args.pose_delta_threshold:
                         consecutive_failures += 1
-                        mode_str = f"TRACK (delta={delta:.3f})"
+                        mode_str = f"TRACK (jump={delta:.3f})"
                     else:
-                        if (
-                            args.periodic_scoring_interval > 0
-                            and frame_count % args.periodic_scoring_interval == 0
-                        ):
-                            with torch.no_grad():
-                                scored, _ = pose_estimator.forward_scoring_model(
-                                    observation, refined
-                                )
-                            score = scored.infos["pose_score"].iloc[0]
-                            if score < 0.3:
-                                consecutive_failures += 1
-                                mode_str = f"TRACK (score={score:.2f})"
-                            else:
-                                last_pose = new_pose
-                                consecutive_failures = 0
-                                mode_str = f"TRACK (score={score:.2f})"
-                        else:
-                            last_pose = new_pose
-                            consecutive_failures = 0
-                            mode_str = "TRACK"
+                        last_pose = new_pose
+                        consecutive_failures = 0
+                        mode_str = "TRACK"
+
+                # Check 2: Cumulative drift from anchor pose
+                if (
+                    consecutive_failures == 0
+                    and anchor_pose is not None
+                    and last_pose is not None
+                ):
+                    drift = np.linalg.norm(
+                        last_pose[:3, 3] - anchor_pose[:3, 3]
+                    )
+                    if drift > args.drift_threshold:
+                        consecutive_failures += 2
+                        mode_str = f"TRACK (drift={drift:.3f}m)"
+                        logger.info(
+                            f"Cumulative drift {drift:.3f}m exceeds "
+                            f"threshold {args.drift_threshold}m"
+                        )
+
+                # Check 3: Periodic DINO verification (lightweight)
+                # Runs DINO every N frames to confirm pose is on the object
+                if (
+                    args.verify_interval > 0
+                    and frame_count % args.verify_interval == 0
+                    and consecutive_failures == 0
+                    and last_pose is not None
+                ):
+                    verify_result = dino.detect_best(rgb)
+
+                    if verify_result is None:
+                        # Object not visible at all — immediate failure
+                        consecutive_failures = args.max_track_failures
+                        mode_str = "VERIFY (object gone)"
+                        logger.info(
+                            "DINO verification: object not found in frame"
+                        )
+                    else:
+                        verify_bbox = verify_result[0]
+                        last_bbox = verify_bbox  # Update bbox from DINO
+
+                        # Check if pose center projects inside DINO bbox
+                        pose_center_px = project_pose_center(K, last_pose)
+                        if not point_in_bbox(pose_center_px, verify_bbox):
+                            consecutive_failures += 3
+                            mode_str = "VERIFY (pose outside bbox)"
+                            logger.info(
+                                f"Pose center {pose_center_px.astype(int).tolist()} "
+                                f"outside DINO bbox {verify_bbox.astype(int).tolist()}"
+                            )
+
+                # Check 4: Periodic scoring (optional, heavier)
+                if (
+                    args.periodic_scoring_interval > 0
+                    and frame_count % args.periodic_scoring_interval == 0
+                    and consecutive_failures == 0
+                    and last_pose is not None
+                ):
+                    pose_tc = build_pose_input(object_label, last_pose).cuda()
+                    with torch.no_grad():
+                        scored, _ = pose_estimator.forward_scoring_model(
+                            observation, pose_tc
+                        )
+                    score = scored.infos["pose_score"].iloc[0]
+                    if score < 0.3:
+                        consecutive_failures += 2
+                        mode_str = f"SCORE (low={score:.2f})"
 
             frame_count += 1
 
@@ -492,9 +592,17 @@ def main():
                 if last_pose is not None:
                     draw_pose_axes(vis, K, last_pose)
 
+                    # Draw pose projected center as a dot
+                    pose_px = project_pose_center(K, last_pose)
+                    cx, cy = int(pose_px[0]), int(pose_px[1])
+                    cv2.circle(vis, (cx, cy), 5, (255, 0, 255), -1)
+
+                status_color = (
+                    (0, 255, 0) if consecutive_failures == 0 else (0, 0, 255)
+                )
                 info = (
                     f"{mode_str} | {fps_smooth:.1f} FPS | "
-                    f"failures={consecutive_failures}/{args.max_track_failures}"
+                    f"fails={consecutive_failures}/{args.max_track_failures}"
                 )
                 cv2.putText(
                     vis,
@@ -502,7 +610,7 @@ def main():
                     (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,
-                    (0, 255, 0),
+                    status_color,
                     2,
                     cv2.LINE_AA,
                 )
